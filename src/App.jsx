@@ -5,13 +5,12 @@ import {
   Plus, Check, X, Share2, ChevronLeft, ChevronRight, User, Clock, MapPin 
 } from 'lucide-react';
 
-// === CONFIGURACIÓN DE SUPABASE ===
-// Reemplaza con las claves de tu proyecto Supabase cuando lo crees
-const SUPABASE_URL = process.env.REACT_APP_SUPABASE_URL || 'https://tu-proyecto.supabase.co';
-const SUPABASE_ANON_KEY = process.env.REACT_APP_SUPABASE_ANON_KEY || 'tu-anon-key';
+const SUPABASE_URL = 'https://ukzshjbsodwknfysjrim.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_qk9JMltu3W40tWGTZFUDcA_PIBuun1s';
 
 const isSupabaseConfigured = SUPABASE_URL !== 'https://tu-proyecto.supabase.co';
 const supabase = isSupabaseConfigured ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+
 
 // CONSTANTES OPERATIVAS
 const PILOTS = ['TTT', 'EDU', 'JOSE', 'MED', 'GTI'];
