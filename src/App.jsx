@@ -9,6 +9,18 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const PILOTS = ['TTT', 'EDU', 'JOS', 'PES', 'MED', 'GTI'];
 const AIRCRAFT_LIST = ['PC-24', 'C-550'];
+const FLIGHT_TYPES = ['LOG', 'ADM', 'INT', 'PRU', 'COL'];
+const FLIGHT_STATUSES = ['PROGRAMADO', 'CONFIRMADO', 'FINALIZADO', 'CANCELADO'];
+
+// COLORES SEGÚN TIPO DE VUELO
+const FLIGHT_TYPE_COLORS = {
+  LOG: '#16a34a', // VERDE
+  ADM: '#2563eb', // AZUL
+  INT: '#16a34a', // VERDE
+  PRU: '#dc2626', // ROJO
+  COL: '#ca8a04'  // AMARILLO
+};
+
 const MONTH_NAMES = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
   'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
@@ -22,7 +34,7 @@ export default function App() {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  // Formulario Evento
+  // Formulario Evento / Vuelo
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({
     id: null,
@@ -33,13 +45,15 @@ export default function App() {
     end_time: '11:00',
     pic: 'TTT',
     cop: 'EDU',
-    callsign: 'ESCOTA 01',
     aircraft: 'PC-24',
+    tipo_vuelo: 'LOG',
+    mision: '',
+    itinerario: '',
     status: 'PROGRAMADO',
     horas_vuelo: 1.0,
     fuera_horas: false,
-    itinerario: '',
-    description: ''
+    description: '',
+    informacion: ''
   });
 
   useEffect(() => {
@@ -62,21 +76,24 @@ export default function App() {
     e.preventDefault();
     setLoading(true);
 
+    const isVuelo = form.type === 'VUELO';
     const payload = {
-      title: form.type === 'VUELO' ? `VUELO ${form.aircraft} - ${form.callsign}` : form.title,
+      title: isVuelo ? `VUELO ${form.aircraft} - ${form.tipo_vuelo}` : form.title,
       type: form.type,
       date: form.date,
       start_time: form.start_time,
       end_time: form.end_time,
-      pic: form.type === 'VUELO' ? form.pic : null,
-      cop: form.type === 'VUELO' ? form.cop : null,
-      callsign: form.type === 'VUELO' ? form.callsign : null,
-      aircraft: form.type === 'VUELO' ? form.aircraft : null,
-      status: form.type === 'VUELO' ? form.status : 'PROGRAMADO',
-      horas_vuelo: form.type === 'VUELO' && form.status === 'FINALIZADO' ? parseFloat(form.horas_vuelo) || 0 : 0,
-      fuera_horas: form.type === 'VUELO' && form.status === 'FINALIZADO' ? form.fuera_horas : false,
-      itinerario: form.itinerario || '',
-      description: form.description || ''
+      aircraft: isVuelo ? form.aircraft : null,
+      tipo_vuelo: isVuelo ? form.tipo_vuelo : null,
+      mision: isVuelo ? form.mision : null,
+      pic: isVuelo ? form.pic : null,
+      cop: isVuelo ? form.cop : null,
+      itinerario: isVuelo ? form.itinerario : null,
+      status: isVuelo ? form.status : 'PROGRAMADO',
+      horas_vuelo: isVuelo && form.status === 'FINALIZADO' ? parseFloat(form.horas_vuelo) || 0 : 0,
+      fuera_horas: isVuelo && form.status === 'FINALIZADO' ? form.fuera_horas : false,
+      description: !isVuelo ? form.description : null,
+      informacion: !isVuelo ? form.informacion : null
     };
 
     if (form.id) {
@@ -90,16 +107,60 @@ export default function App() {
   };
 
   const handleDeleteEvent = async (id) => {
-    if (window.confirm('¿Seguro que quieres eliminar este evento?')) {
+    if (window.confirm('¿Seguro que quieres eliminar este registro?')) {
       await supabase.from('events').delete().eq('id', id);
       fetchEvents();
     }
   };
 
+  // CÁLCULOS PARA LA PESTAÑA STATS
+  const getStatsData = () => {
+    const pilotStats = {};
+    const fueraHorasByPilot = {};
+
+    PILOTS.forEach(p => {
+      pilotStats[p] = { picHours: 0, copHours: 0, totalHours: 0 };
+      fueraHorasByPilot[p] = [];
+    });
+
+    events.filter(e => e.type === 'VUELO' && e.status === 'FINALIZADO').forEach(e => {
+      const hrs = parseFloat(e.horas_vuelo) || 0;
+      const isFuera = e.fuera_horas === true || e.fuera_horas === 'true';
+
+      if (e.pic && pilotStats[e.pic]) {
+        pilotStats[e.pic].picHours += hrs;
+        pilotStats[e.pic].totalHours += hrs;
+        if (isFuera) {
+          fueraHorasByPilot[e.pic].push({
+            id: e.id,
+            tipo_vuelo: e.tipo_vuelo || 'N/A',
+            mision: e.mision || 'Sin Misión',
+            fecha: e.date,
+            rol: 'PIC'
+          });
+        }
+      }
+      if (e.cop && pilotStats[e.cop]) {
+        pilotStats[e.cop].copHours += hrs;
+        pilotStats[e.cop].totalHours += hrs;
+        if (isFuera) {
+          fueraHorasByPilot[e.cop].push({
+            id: e.id,
+            tipo_vuelo: e.tipo_vuelo || 'N/A',
+            mision: e.mision || 'Sin Misión',
+            fecha: e.date,
+            rol: 'COP'
+          });
+        }
+      }
+    });
+
+    return { pilotStats, fueraHorasByPilot };
+  };
+
   // NAVEGACIÓN MES
   const changeMonth = (delta) => {
-    const newDate = new Date(currentMonthDate.getFullYear(), currentMonthDate.getMonth() + delta, 1);
-    setCurrentMonthDate(newDate);
+    setCurrentMonthDate(new Date(currentMonthDate.getFullYear(), currentMonthDate.getMonth() + delta, 1));
   };
 
   // REJILLA MENSUAL
@@ -113,9 +174,7 @@ export default function App() {
     if (startingDay === -1) startingDay = 6;
 
     const days = [];
-    for (let i = 0; i < startingDay; i++) {
-      days.push(null);
-    }
+    for (let i = 0; i < startingDay; i++) days.push(null);
     for (let d = 1; d <= lastDay.getDate(); d++) {
       const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
       days.push({ dayNumber: d, dateStr });
@@ -134,32 +193,6 @@ export default function App() {
       week.push(next.toISOString().split('T')[0]);
     }
     return week;
-  };
-
-  // CÁLCULO ESTADÍSTICAS
-  const getPilotStats = () => {
-    const stats = {};
-    PILOTS.forEach(p => {
-      stats[p] = { picHours: 0, copHours: 0, totalHours: 0, fueraHorasCount: 0 };
-    });
-
-    events.filter(e => e.type === 'VUELO' && e.status === 'FINALIZADO').forEach(e => {
-      const hrs = parseFloat(e.horas_vuelo) || 0;
-      const isFuera = e.fuera_horas === true || e.fuera_horas === 'true';
-
-      if (e.pic && stats[e.pic]) {
-        stats[e.pic].picHours += hrs;
-        stats[e.pic].totalHours += hrs;
-        if (isFuera) stats[e.pic].fueraHorasCount += 1;
-      }
-      if (e.cop && stats[e.cop]) {
-        stats[e.cop].copHours += hrs;
-        stats[e.cop].totalHours += hrs;
-        if (isFuera) stats[e.cop].fueraHorasCount += 1;
-      }
-    });
-
-    return stats;
   };
 
   if (!currentUser) {
@@ -182,10 +215,17 @@ export default function App() {
     );
   }
 
+  const { pilotStats, fueraHorasByPilot } = getStatsData();
   const monthGrid = getMonthGrid();
   const weekDates = getWeekDates(selectedDate);
-  const pilotStats = getPilotStats();
   const selectedDayEvents = events.filter(e => e.date === selectedDate);
+
+  const getEventBorderColor = (e) => {
+    if (e.type === 'VUELO') {
+      return FLIGHT_TYPE_COLORS[e.tipo_vuelo] || '#2563eb';
+    }
+    return '#8b5cf6'; // Morado para EVENTO
+  };
 
   return (
     <div style={{ fontFamily: 'sans-serif', backgroundColor: '#0f172a', color: '#e2e8f0', minHeight: '100vh', paddingBottom: '80px' }}>
@@ -233,7 +273,7 @@ export default function App() {
                   key={item.dateStr}
                   onClick={() => setSelectedDate(item.dateStr)}
                   style={{
-                    backgroundColor: isSelected ? '#2563eb' : '#1e293b',
+                    backgroundColor: isSelected ? '#1e293b' : '#1e293b',
                     borderRadius: '6px',
                     padding: '4px',
                     minHeight: '55px',
@@ -241,11 +281,24 @@ export default function App() {
                     border: isSelected ? '2px solid #38bdf8' : '1px solid #334155'
                   }}
                 >
-                  <span style={{ fontSize: '12px', fontWeight: 'bold', color: isSelected ? '#fff' : '#cbd5e1' }}>{item.dayNumber}</span>
+                  <span style={{ fontSize: '12px', fontWeight: 'bold', color: isSelected ? '#38bdf8' : '#cbd5e1' }}>{item.dayNumber}</span>
                   <div style={{ marginTop: '2px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
                     {dayEvts.slice(0, 2).map(e => (
-                      <span key={e.id} style={{ fontSize: '9px', backgroundColor: e.type === 'VUELO' ? '#0284c7' : '#d97706', color: '#fff', padding: '1px 3px', borderRadius: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {e.callsign || e.title}
+                      <span
+                        key={e.id}
+                        style={{
+                          fontSize: '9px',
+                          backgroundColor: e.type === 'VUELO' ? FLIGHT_TYPE_COLORS[e.tipo_vuelo] || '#2563eb' : '#8b5cf6',
+                          color: '#fff',
+                          padding: '1px 3px',
+                          borderRadius: '2px',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          fontWeight: 'bold'
+                        }}
+                      >
+                        {e.type === 'VUELO' ? `${e.tipo_vuelo} - ${e.mision || 'Misión'}` : e.title}
                       </span>
                     ))}
                     {dayEvts.length > 2 && <span style={{ fontSize: '8px', color: '#38bdf8' }}>+{dayEvts.length - 2} más</span>}
@@ -259,8 +312,32 @@ export default function App() {
           <div style={{ marginTop: '20px', backgroundColor: '#1e293b', padding: '15px', borderRadius: '10px', borderLeft: '4px solid #38bdf8' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
               <h4 style={{ margin: 0, color: '#f8fafc' }}>Eventos para el {selectedDate}</h4>
-              <button onClick={() => { setForm({ ...form, id: null, date: selectedDate, itinerario: '', description: '' }); setShowModal(true); }} style={{ backgroundColor: '#16a34a', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold' }}>
-                + Crear en este día
+              <button
+                onClick={() => {
+                  setForm({
+                    id: null,
+                    title: '',
+                    type: 'VUELO',
+                    date: selectedDate,
+                    start_time: '09:00',
+                    end_time: '11:00',
+                    pic: 'TTT',
+                    cop: 'EDU',
+                    aircraft: 'PC-24',
+                    tipo_vuelo: 'LOG',
+                    mision: '',
+                    itinerario: '',
+                    status: 'PROGRAMADO',
+                    horas_vuelo: 1.0,
+                    fuera_horas: false,
+                    description: '',
+                    informacion: ''
+                  });
+                  setShowModal(true);
+                }}
+                style={{ backgroundColor: '#16a34a', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold' }}
+              >
+                + Añadir Registro
               </button>
             </div>
 
@@ -268,22 +345,31 @@ export default function App() {
               <p style={{ margin: 0, fontSize: '13px', color: '#64748b' }}>Sin actividad este día.</p>
             ) : (
               selectedDayEvents.map(e => (
-                <div key={e.id} style={{ marginTop: '8px', padding: '10px', backgroundColor: '#334155', borderRadius: '6px' }}>
-                  <div style={{ fontWeight: 'bold', color: e.type === 'VUELO' ? '#38bdf8' : '#f59e0b' }}>
-                    {e.title} ({e.start_time} - {e.end_time})
+                <div key={e.id} style={{ marginTop: '8px', padding: '10px', backgroundColor: '#334155', borderRadius: '6px', borderLeft: `4px solid ${getEventBorderColor(e)}` }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ fontWeight: 'bold', color: e.type === 'VUELO' ? FLIGHT_TYPE_COLORS[e.tipo_vuelo] || '#38bdf8' : '#c084fc' }}>
+                      {e.type === 'VUELO' ? `[${e.tipo_vuelo}] ${e.aircraft} - ${e.mision || 'Sin Misión'}` : `[EVENTO] ${e.title}`}
+                    </span>
+                    <span style={{ fontSize: '11px', color: '#94a3b8' }}>{e.start_time} - {e.end_time}</span>
                   </div>
+
                   {e.type === 'VUELO' && (
                     <div style={{ fontSize: '12px', color: '#cbd5e1', marginTop: '4px' }}>
                       <p style={{ margin: '2px 0' }}>🧑‍✈️ <strong>PIC:</strong> {e.pic} | <strong>COP:</strong> {e.cop} | Estado: <strong>{e.status}</strong></p>
                       {e.itinerario && <p style={{ margin: '2px 0', color: '#fcd34d' }}>📍 <strong>Itinerario:</strong> {e.itinerario}</p>}
-                      {e.status === 'FINALIZADO' && <p style={{ margin: '2px 0', color: '#4ade80' }}>⏱️ <strong>Horas:</strong> {e.horas_vuelo}h {e.fuera_horas ? '(Fuera Horas)' : ''}</p>}
+                      {e.status === 'FINALIZADO' && <p style={{ margin: '2px 0', color: '#4ade80' }}>⏱️ <strong>Horas:</strong> {e.horas_vuelo}h {e.fuera_horas ? '🌙 (Fuera de Horas)' : ''}</p>}
                     </div>
                   )}
-                  {e.type === 'OTROS' && e.description && (
-                    <p style={{ fontSize: '12px', color: '#cbd5e1', margin: '4px 0 0 0' }}>📝 {e.description}</p>
+
+                  {e.type === 'EVENTO' && (
+                    <div style={{ fontSize: '12px', color: '#cbd5e1', marginTop: '4px' }}>
+                      {e.description && <p style={{ margin: '2px 0' }}>📝 <strong>Descripción:</strong> {e.description}</p>}
+                      {e.informacion && <p style={{ margin: '2px 0', color: '#38bdf8' }}>ℹ️ <strong>Información:</strong> {e.informacion}</p>}
+                    </div>
                   )}
+
                   <div style={{ marginTop: '8px', display: 'flex', gap: '8px' }}>
-                    <button onClick={() => { setForm(e); setShowModal(true); }} style={{ background: '#1e293b', color: '#38bdf8', border: 'none', padding: '4px 8px', borderRadius: '4px', fontSize: '11px' }}>Editar</button>
+                    <button onClick={() => { setForm({ ...e, itinerario: e.itinerario || '', mision: e.mision || '', description: e.description || '', informacion: e.informacion || '' }); setShowModal(true); }} style={{ background: '#1e293b', color: '#38bdf8', border: 'none', padding: '4px 8px', borderRadius: '4px', fontSize: '11px' }}>Editar</button>
                     <button onClick={() => handleDeleteEvent(e.id)} style={{ background: '#1e293b', color: '#ef4444', border: 'none', padding: '4px 8px', borderRadius: '4px', fontSize: '11px' }}>Eliminar</button>
                   </div>
                 </div>
@@ -306,15 +392,13 @@ export default function App() {
                   <p style={{ margin: '5px 0 0 0', fontSize: '12px', color: '#64748b' }}>Sin actividad</p>
                 ) : (
                   dayEvents.map(e => (
-                    <div key={e.id} style={{ marginTop: '8px', padding: '8px', backgroundColor: '#334155', borderRadius: '6px' }}>
-                      <div style={{ fontWeight: 'bold', color: e.type === 'VUELO' ? '#38bdf8' : '#f59e0b' }}>
-                        {e.title} ({e.start_time} - {e.end_time})
+                    <div key={e.id} style={{ marginTop: '8px', padding: '8px', backgroundColor: '#334155', borderRadius: '6px', borderLeft: `3px solid ${getEventBorderColor(e)}` }}>
+                      <div style={{ fontWeight: 'bold', color: e.type === 'VUELO' ? FLIGHT_TYPE_COLORS[e.tipo_vuelo] || '#38bdf8' : '#c084fc' }}>
+                        {e.type === 'VUELO' ? `[${e.tipo_vuelo}] ${e.aircraft} - ${e.mision || ''}` : e.title} ({e.start_time} - {e.end_time})
                       </div>
                       {e.type === 'VUELO' && (
-                        <div style={{ fontSize: '12px', color: '#cbd5e1', marginTop: '4px' }}>
-                          PIC: {e.pic} | COP: {e.cop}
-                          {e.itinerario && <span style={{ color: '#fcd34d', display: 'block' }}>📍 Itinerario: {e.itinerario}</span>}
-                          {e.status === 'FINALIZADO' && <span style={{ color: '#4ade80', display: 'block' }}>⏱️ Hrs: {e.horas_vuelo}h{e.fuera_horas ? ' (Fuera Horas)' : ''}</span>}
+                        <div style={{ fontSize: '12px', color: '#cbd5e1', marginTop: '2px' }}>
+                          PIC: {e.pic} | COP: {e.cop} | Estado: {e.status}
                         </div>
                       )}
                     </div>
@@ -331,23 +415,27 @@ export default function App() {
         <div style={{ padding: '15px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
             <h3 style={{ margin: 0, color: '#38bdf8' }}>Todas las Operaciones</h3>
-            <button onClick={() => { setForm({ ...form, id: null, itinerario: '', description: '' }); setShowModal(true); }} style={{ backgroundColor: '#16a34a', color: '#fff', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold' }}>
-              + Nuevo Evento
+            <button onClick={() => { setForm({ id: null, title: '', type: 'VUELO', date: selectedDate, start_time: '09:00', end_time: '11:00', pic: 'TTT', cop: 'EDU', aircraft: 'PC-24', tipo_vuelo: 'LOG', mision: '', itinerario: '', status: 'PROGRAMADO', horas_vuelo: 1.0, fuera_horas: false, description: '', informacion: '' }); setShowModal(true); }} style={{ backgroundColor: '#16a34a', color: '#fff', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold' }}>
+              + Nuevo Registro
             </button>
           </div>
 
           {events.length === 0 ? (
-            <p style={{ textAlign: 'center', color: '#64748b', marginTop: '40px' }}>No hay eventos registrados.</p>
+            <p style={{ textAlign: 'center', color: '#64748b', marginTop: '40px' }}>No hay registros guardados.</p>
           ) : (
             events.map(e => (
-              <div key={e.id} style={{ backgroundColor: '#1e293b', borderRadius: '10px', padding: '15px', marginBottom: '12px', borderLeft: e.type === 'VUELO' ? '5px solid #2563eb' : '5px solid #f59e0b' }}>
+              <div key={e.id} style={{ backgroundColor: '#1e293b', borderRadius: '10px', padding: '15px', marginBottom: '12px', borderLeft: `5px solid ${getEventBorderColor(e)}` }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span style={{ fontSize: '12px', color: '#94a3b8' }}>{e.date} | {e.start_time} - {e.end_time}</span>
-                  <span style={{ fontSize: '12px', padding: '2px 8px', borderRadius: '4px', backgroundColor: e.status === 'FINALIZADO' ? '#16a34a' : '#334155' }}>
-                    {e.status}
-                  </span>
+                  {e.type === 'VUELO' && (
+                    <span style={{ fontSize: '12px', padding: '2px 8px', borderRadius: '4px', backgroundColor: e.status === 'FINALIZADO' ? '#16a34a' : '#334155' }}>
+                      {e.status}
+                    </span>
+                  )}
                 </div>
-                <h4 style={{ margin: '8px 0', fontSize: '16px', color: '#f8fafc' }}>{e.title}</h4>
+                <h4 style={{ margin: '8px 0', fontSize: '16px', color: e.type === 'VUELO' ? FLIGHT_TYPE_COLORS[e.tipo_vuelo] || '#f8fafc' : '#c084fc' }}>
+                  {e.type === 'VUELO' ? `[${e.tipo_vuelo}] ${e.aircraft} - ${e.mision || 'Sin Misión'}` : `[EVENTO] ${e.title}`}
+                </h4>
                 {e.type === 'VUELO' && (
                   <div style={{ fontSize: '13px', color: '#cbd5e1' }}>
                     <p style={{ margin: '3px 0' }}>🧑‍✈️ <strong>PIC:</strong> {e.pic} | <strong>COP:</strong> {e.cop}</p>
@@ -357,11 +445,14 @@ export default function App() {
                     )}
                   </div>
                 )}
-                {e.type === 'OTROS' && e.description && (
-                  <p style={{ fontSize: '13px', color: '#cbd5e1', margin: '4px 0' }}>📝 {e.description}</p>
+                {e.type === 'EVENTO' && (
+                  <div style={{ fontSize: '13px', color: '#cbd5e1' }}>
+                    {e.description && <p style={{ margin: '3px 0' }}>📝 <strong>Descripción:</strong> {e.description}</p>}
+                    {e.informacion && <p style={{ margin: '3px 0', color: '#38bdf8' }}>ℹ️ <strong>Información:</strong> {e.informacion}</p>}
+                  </div>
                 )}
                 <div style={{ marginTop: '10px', display: 'flex', gap: '10px' }}>
-                  <button onClick={() => { setForm(e); setShowModal(true); }} style={{ background: '#334155', color: '#38bdf8', border: 'none', padding: '6px 12px', borderRadius: '5px', fontSize: '12px' }}>Editar</button>
+                  <button onClick={() => { setForm({ ...e, itinerario: e.itinerario || '', mision: e.mision || '', description: e.description || '', informacion: e.informacion || '' }); setShowModal(true); }} style={{ background: '#334155', color: '#38bdf8', border: 'none', padding: '6px 12px', borderRadius: '5px', fontSize: '12px' }}>Editar</button>
                   <button onClick={() => handleDeleteEvent(e.id)} style={{ background: '#334155', color: '#ef4444', border: 'none', padding: '6px 12px', borderRadius: '5px', fontSize: '12px' }}>Eliminar</button>
                 </div>
               </div>
@@ -370,12 +461,11 @@ export default function App() {
         </div>
       )}
 
-      {/* VISTA ESTADÍSTICAS */}
+      {/* VISTA ESTADÍSTICAS Y LISTA DE FUERA DE HORAS */}
       {view === 'stats' && (
         <div style={{ padding: '15px' }}>
-          <h3 style={{ color: '#38bdf8', marginBottom: '15px', marginTop: 0 }}>Resumen de Horas Acumuladas</h3>
-          
-          <table style={{ width: '100%', borderCollapse: 'collapse', backgroundColor: '#1e293b', borderRadius: '8px', overflow: 'hidden', marginBottom: '25px' }}>
+          <h3 style={{ color: '#38bdf8', marginBottom: '15px', marginTop: 0 }}>1. Horas Acumuladas por Piloto</h3>
+          <table style={{ width: '100%', borderCollapse: 'collapse', backgroundColor: '#1e293b', borderRadius: '8px', overflow: 'hidden', marginBottom: '30px' }}>
             <thead>
               <tr style={{ backgroundColor: '#334155', color: '#38bdf8', textAlign: 'left' }}>
                 <th style={{ padding: '10px' }}>Piloto</th>
@@ -396,49 +486,62 @@ export default function App() {
             </tbody>
           </table>
 
-          <h3 style={{ color: '#f59e0b', marginBottom: '15px' }}>Vuelos Fuera de Horas</h3>
-          <table style={{ width: '100%', borderCollapse: 'collapse', backgroundColor: '#1e293b', borderRadius: '8px', overflow: 'hidden' }}>
-            <thead>
-              <tr style={{ backgroundColor: '#334155', color: '#f59e0b', textAlign: 'left' }}>
-                <th style={{ padding: '10px' }}>Piloto</th>
-                <th style={{ padding: '10px' }}>Vuelos Fuera de Horas</th>
-              </tr>
-            </thead>
-            <tbody>
-              {PILOTS.map(p => (
-                <tr key={p} style={{ borderBottom: '1px solid #334155' }}>
-                  <td style={{ padding: '10px', fontWeight: 'bold' }}>{p}</td>
-                  <td style={{ padding: '10px', color: '#f59e0b', fontWeight: 'bold' }}>{pilotStats[p].fueraHorasCount} vuelos</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <h3 style={{ color: '#f59e0b', marginBottom: '15px' }}>2. Detalle de Vuelos Fuera de Horas por Piloto</h3>
+          {PILOTS.map(p => {
+            const list = fueraHorasByPilot[p];
+            return (
+              <div key={p} style={{ backgroundColor: '#1e293b', borderRadius: '8px', padding: '12px', marginBottom: '15px' }}>
+                <h4 style={{ margin: '0 0 10px 0', color: '#f59e0b' }}>
+                  👨‍✈️ Piloto {p} <span style={{ fontSize: '12px', color: '#94a3b8' }}>({list.length} vuelos fuera de horas)</span>
+                </h4>
+                {list.length === 0 ? (
+                  <p style={{ margin: 0, fontSize: '12px', color: '#64748b' }}>Sin vuelos fuera de horas registrados.</p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {list.map((item, i) => (
+                      <div key={i} style={{ backgroundColor: '#334155', padding: '8px', borderRadius: '6px', fontSize: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                          <strong style={{ color: FLIGHT_TYPE_COLORS[item.tipo_vuelo] || '#fff' }}>[{item.tipo_vuelo}]</strong> - Misión: <strong>{item.mision}</strong> ({item.rol})
+                        </div>
+                        <span style={{ color: '#cbd5e1' }}>{item.fecha}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
-      {/* MODAL CREAR / EDITAR EVENTO */}
+      {/* MODAL CREAR / EDITAR */}
       {showModal && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '15px', zIndex: 1000 }}>
           <div style={{ backgroundColor: '#1e293b', borderRadius: '12px', padding: '20px', width: '100%', maxWidth: '400px', maxHeight: '90vh', overflowY: 'auto' }}>
-            <h3 style={{ marginTop: 0, color: '#38bdf8' }}>{form.id ? 'Editar Evento' : 'Nuevo Evento'}</h3>
+            <h3 style={{ marginTop: 0, color: '#38bdf8' }}>{form.id ? 'Editar Registro' : 'Nuevo Registro'}</h3>
             
             <form onSubmit={handleSaveEvent}>
-              <label style={{ fontSize: '12px', color: '#94a3b8' }}>Tipo:</label>
+              <label style={{ fontSize: '12px', color: '#94a3b8' }}>Categoría:</label>
               <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} style={{ width: '100%', padding: '8px', margin: '5px 0 12px 0', borderRadius: '6px', backgroundColor: '#334155', color: '#fff', border: 'none' }}>
                 <option value="VUELO">VUELO</option>
-                <option value="OTROS">OTROS / REUNIÓN / GUARDIA</option>
+                <option value="EVENTO">EVENTO / OTROS</option>
               </select>
 
-              {form.type === 'OTROS' && (
+              {/* CAMPOS TIPO EVENTO */}
+              {form.type === 'EVENTO' && (
                 <>
-                  <label style={{ fontSize: '12px', color: '#94a3b8' }}>Título:</label>
+                  <label style={{ fontSize: '12px', color: '#94a3b8' }}>Título de la actividad:</label>
                   <input type="text" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} required style={{ width: '100%', padding: '8px', margin: '5px 0 12px 0', borderRadius: '6px', backgroundColor: '#334155', color: '#fff', border: 'none' }} />
                   
-                  <label style={{ fontSize: '12px', color: '#94a3b8' }}>Descripción / Notas:</label>
+                  <label style={{ fontSize: '12px', color: '#94a3b8' }}>Descripción:</label>
                   <textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} rows={2} style={{ width: '100%', padding: '8px', margin: '5px 0 12px 0', borderRadius: '6px', backgroundColor: '#334155', color: '#fff', border: 'none' }} />
+
+                  <label style={{ fontSize: '12px', color: '#94a3b8' }}>Información extra:</label>
+                  <textarea value={form.informacion} onChange={e => setForm({ ...form, informacion: e.target.value })} rows={2} style={{ width: '100%', padding: '8px', margin: '5px 0 12px 0', borderRadius: '6px', backgroundColor: '#334155', color: '#fff', border: 'none' }} />
                 </>
               )}
 
+              {/* CAMPOS TIPO VUELO */}
               {form.type === 'VUELO' && (
                 <>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
@@ -449,10 +552,15 @@ export default function App() {
                       </select>
                     </div>
                     <div>
-                      <label style={{ fontSize: '12px', color: '#94a3b8' }}>Callsign:</label>
-                      <input type="text" value={form.callsign} onChange={e => setForm({ ...form, callsign: e.target.value })} style={{ width: '100%', padding: '8px', margin: '5px 0 12px 0', borderRadius: '6px', backgroundColor: '#334155', color: '#fff', border: 'none' }} />
+                      <label style={{ fontSize: '12px', color: '#94a3b8' }}>Tipo de Vuelo:</label>
+                      <select value={form.tipo_vuelo} onChange={e => setForm({ ...form, tipo_vuelo: e.target.value })} style={{ width: '100%', padding: '8px', margin: '5px 0 12px 0', borderRadius: '6px', backgroundColor: '#334155', color: '#fff', border: 'none' }}>
+                        {FLIGHT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                      </select>
                     </div>
                   </div>
+
+                  <label style={{ fontSize: '12px', color: '#94a3b8' }}>Misión:</label>
+                  <input type="text" placeholder="Ej: ADEX" value={form.mision} onChange={e => setForm({ ...form, mision: e.target.value })} style={{ width: '100%', padding: '8px', margin: '5px 0 12px 0', borderRadius: '6px', backgroundColor: '#334155', color: '#fff', border: 'none' }} />
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                     <div>
@@ -469,22 +577,18 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* CASILLA DE ITINERARIO DE VUELO */}
-                  <label style={{ fontSize: '12px', color: '#fcd34d', fontWeight: 'bold' }}>Itinerario de Vuelo (Texto Libre):</label>
-                  <input type="text" placeholder="Ej: LERT - LEMD - LERT" value={form.itinerario} onChange={e => setForm({ ...form, itinerario: e.target.value })} style={{ width: '100%', padding: '8px', margin: '5px 0 12px 0', borderRadius: '6px', backgroundColor: '#334155', color: '#fff', border: '1px solid #fcd34d' }} />
+                  <label style={{ fontSize: '12px', color: '#fcd34d' }}>Itinerario (Opcional):</label>
+                  <input type="text" placeholder="Ej: LERT - LEMD - LERT" value={form.itinerario} onChange={e => setForm({ ...form, itinerario: e.target.value })} style={{ width: '100%', padding: '8px', margin: '5px 0 12px 0', borderRadius: '6px', backgroundColor: '#334155', color: '#fff', border: 'none' }} />
 
                   <label style={{ fontSize: '12px', color: '#94a3b8' }}>Estado del Vuelo:</label>
                   <select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })} style={{ width: '100%', padding: '8px', margin: '5px 0 12px 0', borderRadius: '6px', backgroundColor: '#334155', color: '#fff', border: 'none' }}>
-                    <option value="PROGRAMADO">PROGRAMADO</option>
-                    <option value="EN CURSO">EN CURSO</option>
-                    <option value="FINALIZADO">FINALIZADO</option>
-                    <option value="CANCELADO">CANCELADO</option>
+                    {FLIGHT_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
 
                   {/* DESPLEGABLES EXTRA SI ESTÁ FINALIZADO */}
                   {form.status === 'FINALIZADO' && (
                     <div style={{ padding: '10px', backgroundColor: '#0f172a', borderRadius: '8px', marginBottom: '12px', border: '1px solid #16a34a' }}>
-                      <label style={{ fontSize: '12px', color: '#4ade80', fontWeight: 'bold' }}>Horas de Vuelo Realizadas:</label>
+                      <label style={{ fontSize: '12px', color: '#4ade80', fontWeight: 'bold' }}>Horas de Vuelo Reales Realizadas:</label>
                       <input type="number" step="0.1" value={form.horas_vuelo} onChange={e => setForm({ ...form, horas_vuelo: e.target.value })} style={{ width: '100%', padding: '8px', margin: '5px 0 10px 0', borderRadius: '6px', backgroundColor: '#334155', color: '#fff', border: 'none' }} />
 
                       <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#f59e0b', cursor: 'pointer' }}>
