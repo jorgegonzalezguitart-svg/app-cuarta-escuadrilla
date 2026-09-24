@@ -1,706 +1,393 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { 
-  Calendar as CalendarIcon, Plane, UserCheck, AlertTriangle, 
-  Plus, Check, X, Share2, ChevronLeft, ChevronRight, User, Clock, MapPin 
-} from 'lucide-react';
 
+// --- CONFIGURACIÓN SUPABASE ---
 const SUPABASE_URL = 'https://ukzshjbsodwknfysjrim.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_qk9JMltu3W40tWGTZFUDcA_PIBuun1s';
 
-const isSupabaseConfigured = SUPABASE_URL !== 'https://tu-proyecto.supabase.co';
-const supabase = isSupabaseConfigured ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-
-// CONSTANTES OPERATIVAS
-const PILOTS = ['TTT', 'EDU', 'JOSE', 'MED', 'GTI'];
-const AIRCRAFT = ['PC-24', 'C-550'];
-const FLIGHT_TYPES = ['PRUEBAS', 'ADM', 'LOG', 'INTERNACIONAL'];
-const FLIGHT_STATUSES = [
-  { label: 'Confirmado', value: 'confirmado', color: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' },
-  { label: 'Propuesto', value: 'propuesto', color: 'bg-amber-500/20 text-amber-400 border-amber-500/30' },
-  { label: 'Dudoso', value: 'dudoso', color: 'bg-orange-500/20 text-orange-400 border-orange-500/30' },
-  { label: 'Cancelado', value: 'cancelado', color: 'bg-rose-500/20 text-rose-400 border-rose-500/30 line-through' }
-];
-const AVAILABILITY_TYPES = ['guardia', 'saliente', 'AP', 'permiso', 'comisión'];
-
-// FESTIVOS DE ROTA Y ANDALUCÍA (2026/Recurrentes)
-const HOLIDAYS_ROTA = {
-  '01-01': 'Año Nuevo',
-  '01-06': 'Epifanía del Señor',
-  '02-28': 'Día de Andalucía',
-  '04-02': 'Jueves Santo',
-  '04-03': 'Viernes Santo',
-  '05-01': 'Fiesta del Trabajo',
-  '08-15': 'Asunción de la Virgen',
-  '10-07': 'Virgen del Rosario (Patrona de Rota)',
-  '10-12': 'Fiesta Nacional de España',
-  '11-01': 'Todos los Santos',
-  '12-06': 'Día de la Constitución',
-  '12-08': 'Inmaculada Concepción',
-  '12-25': 'Natividad del Señor'
-};
+const PILOTS = ['TTT', 'EDU', 'JOS', 'PES', 'MED', 'GTI'];
+const AIRCRAFT_LIST = ['PC-24', 'C-550'];
 
 export default function App() {
-  // Estado de Perfil y Navegación
-  const [currentPilot, setCurrentPilot] = useState(() => localStorage.getItem('4esc_pilot') || '');
-  const [currentDate, setCurrentDate] = useState(new Date());
-  const [selectedDateStr, setSelectedDateStr] = useState(new Date().toISOString().split('T')[0]);
-
-  // Datos
+  const [currentUser, setCurrentUser] = useState(localStorage.getItem('cuarta_pilot') || '');
+  const [view, setView] = useState('month'); // 'month', 'week', 'stats', 'availability'
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [events, setEvents] = useState([]);
   const [availabilities, setAvailabilities] = useState([]);
-
-  // Modales
-  const [showEventModal, setShowEventModal] = useState(false);
-  const [showAvailModal, setShowAvailModal] = useState(false);
-  const [showDayDetail, setShowDayDetail] = useState(false);
-  const [whatsappCopied, setWhatsappCopied] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   // Formulario Evento
-  const [eventForm, setEventForm] = useState({
-    category: 'VUELO',
-    title: '', schedule: '', participants: '',
-    flight_type: 'PRUEBAS', status: 'propuesto', aircraft: 'PC-24',
-    callsign: '', itinerary: '', out_of_hours: 'no', pic: 'TTT', cop: 'EDU', notes: ''
+  const [showModal, setShowModal] = useState(false);
+  const [form, setForm] = useState({
+    id: null,
+    title: '',
+    type: 'VUELO',
+    date: new Date().toISOString().split('T')[0],
+    start_time: '09:00',
+    end_time: '11:00',
+    pic: 'TTT',
+    cop: 'EDU',
+    callsign: 'ESCOTA 01',
+    aircraft: 'PC-24',
+    status: 'PROGRAMADO',
+    horas_vuelo: 1.0,
+    fuera_horas: false,
+    description: ''
   });
 
-  // Formulario Disponibilidad
-  const [availForm, setAvailForm] = useState({ pilot: currentPilot || 'TTT', status: 'permiso' });
-
-  // Guardar Selección de Perfil
-  const handleSelectPilot = (pilot) => {
-    setCurrentPilot(pilot);
-    localStorage.setItem('4esc_pilot', pilot);
-    setAvailForm(prev => ({ ...prev, pilot }));
-  };
-
-  // Cargar Datos (Supabase o LocalStorage)
   useEffect(() => {
-    loadData();
-  }, [currentDate]);
+    fetchEvents();
+    fetchAvailabilities();
+  }, []);
 
-  const loadData = async () => {
-    if (isSupabaseConfigured) {
-      const { data: evs } = await supabase.from('events').select('*');
-      if (evs) setEvents(evs);
-      const { data: avs } = await supabase.from('pilot_availability').select('*');
-      if (avs) setAvailabilities(avs);
+  const fetchEvents = async () => {
+    setLoading(true);
+    const { data, error } = await supabase.from('events').select('*').order('date', { ascending: true });
+    if (!error && data) setEvents(data);
+    setLoading(false);
+  };
+
+  const fetchAvailabilities = async () => {
+    const { data, error } = await supabase.from('pilot_availability').select('*');
+    if (!error && data) setAvailabilities(data);
+  };
+
+  const handleUserSelect = (pilot) => {
+    setCurrentUser(pilot);
+    localStorage.setItem('cuarta_pilot', pilot);
+  };
+
+  const handleSaveEvent = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+
+    const payload = {
+      title: form.type === 'VUELO' ? `VUELO ${form.aircraft} - ${form.callsign}` : form.title,
+      type: form.type,
+      date: form.date,
+      start_time: form.start_time,
+      end_time: form.end_time,
+      pic: form.type === 'VUELO' ? form.pic : null,
+      cop: form.type === 'VUELO' ? form.cop : null,
+      callsign: form.type === 'VUELO' ? form.callsign : null,
+      aircraft: form.type === 'VUELO' ? form.aircraft : null,
+      status: form.type === 'VUELO' ? form.status : 'PROGRAMADO',
+      horas_vuelo: form.type === 'VUELO' && form.status === 'FINALIZADO' ? parseFloat(form.horas_vuelo) || 0 : 0,
+      fuera_horas: form.type === 'VUELO' && form.status === 'FINALIZADO' ? form.fuera_horas : false,
+      description: form.description
+    };
+
+    if (form.id) {
+      await supabase.from('events').update(payload).eq('id', form.id);
     } else {
-      const localEvs = JSON.parse(localStorage.getItem('4esc_events') || '[]');
-      const localAvs = JSON.parse(localStorage.getItem('4esc_availabilities') || '[]');
-      setEvents(localEvs);
-      setAvailabilities(localAvs);
+      await supabase.from('events').insert([payload]);
+    }
+
+    setShowModal(false);
+    fetchEvents();
+  };
+
+  const handleDeleteEvent = async (id) => {
+    if (window.confirm('¿Seguro que quieres eliminar este evento?')) {
+      await supabase.from('events').delete().eq('id', id);
+      fetchEvents();
     }
   };
 
-  // Generación de Días del Mes
-  const daysInMonth = useMemo(() => {
-    const year = currentDate.getFullYear();
-    const month = currentDate.getMonth();
-    const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month + 1, 0);
-    const days = [];
+  // CÁLCULOS ESTADÍSTICAS POR PILOTO
+  const getPilotStats = () => {
+    const stats = {};
+    PILOTS.forEach(p => {
+      stats[p] = { picHours: 0, copHours: 0, totalHours: 0, fueraHorasCount: 0 };
+    });
 
-    // Offset día de la semana (Lunes = 0)
-    let startDayOfWeek = firstDay.getDay() - 1;
-    if (startDayOfWeek === -1) startDayOfWeek = 6;
+    events.filter(e => e.type === 'VUELO' && e.status === 'FINALIZADO').forEach(e => {
+      const hrs = parseFloat(e.horas_vuelo) || 0;
+      const isFuera = e.fuera_horas === true || e.fuera_horas === 'true';
 
-    for (let i = 0; i < startDayOfWeek; i++) {
-      days.push(null);
-    }
+      if (e.pic && stats[e.pic]) {
+        stats[e.pic].picHours += hrs;
+        stats[e.pic].totalHours += hrs;
+        if (isFuera) stats[e.pic].fueraHorasCount += 1;
+      }
+      if (e.cop && stats[e.cop]) {
+        stats[e.cop].copHours += hrs;
+        stats[e.cop].totalHours += hrs;
+        if (isFuera) stats[e.cop].fueraHorasCount += 1;
+      }
+    });
 
-    for (let d = 1; d <= lastDay.getDate(); d++) {
-      const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-      days.push({ date: d, dateStr });
-    }
-
-    return days;
-  }, [currentDate]);
-
-  // Alerta de Incompatibilidad de Pilotos
-  const crewConflict = useMemo(() => {
-    if (eventForm.category !== 'VUELO') return null;
-    const dateAvails = availabilities.filter(a => a.date === selectedDateStr);
-    const picUnavail = dateAvails.find(a => a.pilot === eventForm.pic);
-    const copUnavail = dateAvails.find(a => a.pilot === eventForm.cop);
-
-    let conflicts = [];
-    if (picUnavail) conflicts.push(`PIC ${eventForm.pic} está de ${picUnavail.status.toUpperCase()}`);
-    if (copUnavail) conflicts.push(`COP ${eventForm.cop} está de ${copUnavail.status.toUpperCase()}`);
-    return conflicts.length > 0 ? conflicts.join(' | ') : null;
-  }, [eventForm, selectedDateStr, availabilities]);
-
-  // Guardar Evento
-  const handleSaveEvent = async () => {
-    const newEvent = { ...eventForm, date: selectedDateStr, id: crypto.randomUUID() };
-    if (isSupabaseConfigured) {
-      await supabase.from('events').insert([newEvent]);
-    } else {
-      const updated = [...events, newEvent];
-      setEvents(updated);
-      localStorage.setItem('4esc_events', JSON.stringify(updated));
-    }
-    setShowEventModal(false);
-    loadData();
+    return stats;
   };
 
-  // Guardar Disponibilidad
-  const handleSaveAvail = async () => {
-    const newAvail = { ...availForm, date: selectedDateStr, id: crypto.randomUUID() };
-    if (isSupabaseConfigured) {
-      await supabase.from('pilot_availability').upsert([newAvail], { onConflict: 'date,pilot' });
-    } else {
-      const filtered = availabilities.filter(a => !(a.date === selectedDateStr && a.pilot === availForm.pilot));
-      const updated = [...filtered, newAvail];
-      setAvailabilities(updated);
-      localStorage.setItem('4esc_availabilities', JSON.stringify(updated));
+  // CÁLCULO DÍAS SEMANA
+  const getWeekDates = (dateStr) => {
+    const curr = new Date(dateStr);
+    const first = curr.getDate() - (curr.getDay() === 0 ? 6 : curr.getDay() - 1);
+    const week = [];
+    for (let i = 0; i < 7; i++) {
+      const next = new Date(curr);
+      next.setDate(first + i);
+      week.push(next.toISOString().split('T')[0]);
     }
-    setShowAvailModal(false);
-    loadData();
+    return week;
   };
 
-  // Exportar Orden del Día a WhatsApp
-  const generateWhatsAppBrief = () => {
-    const dayEvents = events.filter(e => e.date === selectedDateStr);
-    const dayAvails = availabilities.filter(a => a.date === selectedDateStr);
-    const dateFormatted = new Date(selectedDateStr + 'T00:00:00').toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'short' }).toUpperCase();
-
-    let text = `✈️ *4ª ESCUADRILLA - OPs ${dateFormatted}*\n`;
-    text += `─────────────\n`;
-
-    if (dayEvents.length === 0) {
-      text += `Sin vuelos ni eventos programados.\n`;
-    } else {
-      dayEvents.forEach(e => {
-        if (e.category === 'VUELO') {
-          text += `• *${e.aircraft}* | C/S: *${e.callsign || 'N/A'}* | ${e.flight_type}\n`;
-          text += `  Ruta: ${e.itinerary || 'Local'} | PIC: ${e.pic} / COP: ${e.cop}\n`;
-          text += `  Estado: _${e.status.toUpperCase()}_ ${e.out_of_hours === 'sí' ? ' [Fuera Horas]' : ''}\n\n`;
-        } else {
-          text += `📌 *EVENTO:* ${e.title} (${e.schedule || 'Todo el día'})\n`;
-          text += `  Part: ${e.participants || 'Todos'}\n\n`;
-        }
-      });
-    }
-
-    if (dayAvails.length > 0) {
-      text += `🔴 *NO DISPONIBLES:*\n`;
-      dayAvails.forEach(a => {
-        text += `• ${a.pilot}: ${a.status.toUpperCase()}\n`;
-      });
-    }
-
-    navigator.clipboard.writeText(text);
-    setWhatsappCopied(true);
-    setTimeout(() => setWhatsappCopied(false), 2500);
-  };
-
-  // Selector de Perfil si no hay seleccionado
-  if (!currentPilot) {
+  if (!currentUser) {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-6">
-        <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl text-center space-y-6">
-          <div className="mx-auto w-16 h-16 bg-blue-600/20 border border-blue-500/30 rounded-full flex items-center justify-center text-blue-400">
-            <Plane size={32} />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-white">4ª ESCUADRILLA</h1>
-            <p className="text-sm text-slate-400 mt-1">Selecciona tu indicativo para acceder al calendario operativo</p>
-          </div>
-          <div className="grid grid-cols-1 gap-3">
-            {PILOTS.map(pilot => (
-              <button
-                key={pilot}
-                onClick={() => handleSelectPilot(pilot)}
-                className="w-full py-3 px-4 bg-slate-800 hover:bg-blue-600 border border-slate-700 hover:border-blue-500 rounded-xl font-bold transition flex items-center justify-between"
-              >
-                <span>PILOTO {pilot}</span>
-                <User size={18} className="text-slate-400" />
-              </button>
-            ))}
-          </div>
+      <div style={{ padding: '40px 20px', textAlign: 'center', fontFamily: 'sans-serif', backgroundColor: '#0f172a', color: '#fff', minHeight: '100vh' }}>
+        <h1 style={{ fontSize: '24px', marginBottom: '10px' }}>CUARTA ESCUADRILLA</h1>
+        <p style={{ color: '#94a3b8', marginBottom: '30px' }}>Selecciona tu indicativo de piloto:</p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '15px', maxWidth: '300px', margin: '0 auto' }}>
+          {PILOTS.map(p => (
+            <button
+              key={p}
+              onClick={() => handleUserSelect(p)}
+              style={{ padding: '20px', fontSize: '20px', fontWeight: 'bold', borderRadius: '12px', border: 'none', backgroundColor: '#2563eb', color: '#fff', cursor: 'pointer' }}
+            >
+              {p}
+            </button>
+          ))}
         </div>
       </div>
     );
   }
 
-  return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans pb-12">
-      {/* HEADER PRINCIPAL */}
-      <header className="sticky top-0 z-20 bg-slate-900/90 backdrop-blur border-b border-slate-800 px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center space-x-3">
-          <div className="p-2 bg-blue-600/20 border border-blue-500/30 rounded-xl text-blue-400">
-            <Plane size={22} />
-          </div>
-          <div>
-            <h1 className="font-bold text-sm leading-tight text-white">4ª ESCUADRILLA</h1>
-            <p className="text-xs text-slate-400">Base Naval de Rota</p>
-          </div>
-        </div>
+  const pilotStats = getPilotStats();
+  const weekDates = getWeekDates(selectedDate);
 
-        <div className="flex items-center space-x-2">
-          <span className="text-xs bg-slate-800 border border-slate-700 px-3 py-1.5 rounded-lg font-mono font-semibold text-blue-400 flex items-center gap-1.5">
-            <User size={14} /> {currentPilot}
-          </span>
-          <button
-            onClick={() => setCurrentPilot('')}
-            className="text-xs text-slate-500 hover:text-slate-300 p-1.5"
-            title="Cambiar Perfil"
-          >
-            <X size={16} />
-          </button>
+  return (
+    <div style={{ fontFamily: 'sans-serif', backgroundColor: '#0f172a', color: '#e2e8f0', minHeight: '100vh', paddingBottom: '80px' }}>
+      {/* CABECERA */}
+      <header style={{ backgroundColor: '#1e293b', padding: '15px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #334155' }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: '18px', color: '#38bdf8' }}>CUARTA ESCUADRILLA</h2>
+          <span style={{ fontSize: '12px', color: '#94a3b8' }}>Usuario: <strong>{currentUser}</strong></span>
         </div>
+        <button onClick={() => setCurrentUser('')} style={{ background: 'none', border: '1px solid #475569', color: '#94a3b8', padding: '5px 10px', borderRadius: '6px', fontSize: '12px' }}>
+          Cambiar
+        </button>
       </header>
 
-      {/* NAVEGACIÓN MES */}
-      <div className="max-w-4xl mx-auto px-4 mt-6">
-        <div className="flex items-center justify-between bg-slate-900 border border-slate-800 rounded-2xl p-4 mb-4 shadow-lg">
-          <button
-            onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1))}
-            className="p-2 bg-slate-800 hover:bg-slate-700 rounded-xl transition"
-          >
-            <ChevronLeft size={20} />
-          </button>
-          <h2 className="text-lg font-bold capitalize text-white tracking-wide">
-            {currentDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })}
-          </h2>
-          <button
-            onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1))}
-            className="p-2 bg-slate-800 hover:bg-slate-700 rounded-xl transition"
-          >
-            <ChevronRight size={20} />
-          </button>
-        </div>
+      {/* BOTONES DE NAVEGACIÓN */}
+      <nav style={{ display: 'flex', justifyContent: 'space-around', backgroundColor: '#1e293b', padding: '10px', borderBottom: '1px solid #334155' }}>
+        <button onClick={() => setView('month')} style={{ background: view === 'month' ? '#2563eb' : 'transparent', color: '#fff', border: 'none', padding: '8px 12px', borderRadius: '6px', fontWeight: 'bold' }}>Mes</button>
+        <button onClick={() => setView('week')} style={{ background: view === 'week' ? '#2563eb' : 'transparent', color: '#fff', border: 'none', padding: '8px 12px', borderRadius: '6px', fontWeight: 'bold' }}>Semana</button>
+        <button onClick={() => setView('stats')} style={{ background: view === 'stats' ? '#2563eb' : 'transparent', color: '#fff', border: 'none', padding: '8px 12px', borderRadius: '6px', fontWeight: 'bold' }}>Horas / Stats</button>
+      </nav>
 
-        {/* CALENDARIO MES */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 shadow-xl">
-          {/* Cabecera días semana */}
-          <div className="grid grid-cols-7 gap-1 mb-2 text-center text-xs font-bold text-slate-400 uppercase tracking-wider">
-            <span>Lun</span><span>Mar</span><span>Mié</span><span>Jue</span><span>Vie</span><span>Sáb</span><span>Dom</span>
-          </div>
-
-          {/* Celdas días */}
-          <div className="grid grid-cols-7 gap-1">
-            {daysInMonth.map((day, idx) => {
-              if (!day) return <div key={idx} className="h-28 bg-slate-950/40 rounded-xl" />;
-
-              const dayEvents = events.filter(e => e.date === day.dateStr);
-              const dayAvails = availabilities.filter(a => a.date === day.dateStr);
-              const isToday = new Date().toISOString().split('T')[0] === day.dateStr;
-              const holidayKey = day.dateStr.slice(5);
-              const holidayName = HOLIDAYS_ROTA[holidayKey];
-
-              return (
-                <div
-                  key={day.dateStr}
-                  onClick={() => {
-                    setSelectedDateStr(day.dateStr);
-                    setShowDayDetail(true);
-                  }}
-                  className={`h-28 p-1.5 rounded-xl border transition cursor-pointer flex flex-col justify-between overflow-hidden ${
-                    isToday
-                      ? 'bg-blue-950/30 border-blue-500/50 shadow-inner'
-                      : 'bg-slate-950/70 border-slate-800 hover:border-slate-700'
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className={`text-xs font-bold ${isToday ? 'bg-blue-600 text-white w-5 h-5 rounded-full flex items-center justify-center' : 'text-slate-300'}`}>
-                      {day.date}
-                    </span>
-                    {holidayName && (
-                      <span className="w-2 h-2 rounded-full bg-rose-500" title={`Festivo Rota: ${holidayName}`} />
-                    )}
-                  </div>
-
-                  {/* Resumen de contenido del día */}
-                  <div className="space-y-1 my-auto overflow-hidden">
-                    {dayEvents.slice(0, 2).map((ev) => {
-                      const st = FLIGHT_STATUSES.find(s => s.value === ev.status);
-                      return (
-                        <div
-                          key={ev.id}
-                          className={`text-[10px] px-1.5 py-0.5 rounded border truncate ${
-                            ev.category === 'VUELO'
-                              ? `${st?.color || 'bg-slate-800 text-slate-300 border-slate-700'}`
-                              : 'bg-purple-500/20 text-purple-300 border-purple-500/30 font-medium'
-                          }`}
-                        >
-                          {ev.category === 'VUELO' ? `${ev.aircraft} | ${ev.callsign || ev.flight_type}` : ev.title}
-                        </div>
-                      );
-                    })}
-                    {dayEvents.length > 2 && (
-                      <div className="text-[9px] text-slate-500 font-semibold text-center">
-                        +{dayEvents.length - 2} más
+      {/* CONTENIDO VISTA SEMANAL */}
+      {view === 'week' && (
+        <div style={{ padding: '15px' }}>
+          <h3 style={{ textAlign: 'center', color: '#38bdf8' }}>Vista Semanal</h3>
+          {weekDates.map(d => {
+            const dayEvents = events.filter(e => e.date === d);
+            return (
+              <div key={d} style={{ backgroundColor: '#1e293b', borderRadius: '8px', padding: '12px', marginBottom: '10px', borderLeft: '4px solid #2563eb' }}>
+                <strong style={{ color: '#f8fafc' }}>{d}</strong>
+                {dayEvents.length === 0 ? (
+                  <p style={{ margin: '5px 0 0 0', fontSize: '12px', color: '#64748b' }}>Sin actividad</p>
+                ) : (
+                  dayEvents.map(e => (
+                    <div key={e.id} style={{ marginTop: '8px', padding: '8px', backgroundColor: '#334155', borderRadius: '6px' }}>
+                      <div style={{ fontWeight: 'bold', color: e.type === 'VUELO' ? '#38bdf8' : '#f59e0b' }}>
+                        {e.title} ({e.start_time} - {e.end_time})
                       </div>
-                    )}
-                  </div>
-
-                  {/* No disponibles en el día */}
-                  {dayAvails.length > 0 && (
-                    <div className="text-[9px] text-rose-400/90 font-mono font-semibold truncate bg-rose-950/30 px-1 py-0.5 rounded">
-                      🚫 {dayAvails.map(a => a.pilot).join(', ')}
+                      {e.type === 'VUELO' && (
+                        <div style={{ fontSize: '12px', color: '#cbd5e1', marginTop: '4px' }}>
+                          PIC: {e.pic} | COP: {e.cop} | Estado: <strong>{e.status}</strong>
+                          {e.status === 'FINALIZADO' && ` | Hrs: ${e.horas_vuelo}h${e.fuera_horas ? ' (Fuera Horas)' : ''}`}
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-
-      {/* MODAL DETALLE DE DÍA */}
-      {showDayDetail && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg p-6 shadow-2xl max-h-[90vh] overflow-y-auto space-y-6">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-              <div>
-                <h3 className="text-xl font-bold text-white capitalize">
-                  {new Date(selectedDateStr + 'T00:00:00').toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}
-                </h3>
-                {HOLIDAYS_ROTA[selectedDateStr.slice(5)] && (
-                  <p className="text-xs text-rose-400 font-semibold mt-1">
-                    🎉 Festivo Rota/Andalucía: {HOLIDAYS_ROTA[selectedDateStr.slice(5)]}
-                  </p>
+                  ))
                 )}
               </div>
-              <button onClick={() => setShowDayDetail(false)} className="p-2 text-slate-400 hover:text-white">
-                <X size={20} />
-              </button>
-            </div>
+            );
+          })}
+        </div>
+      )}
 
-            {/* Acciones Rápidas */}
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={() => { setShowEventModal(true); setShowDayDetail(false); }}
-                className="flex-1 py-2.5 px-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow"
-              >
-                <Plus size={16} /> Añadir Evento / Vuelo
-              </button>
-              <button
-                onClick={() => { setShowAvailModal(true); setShowDayDetail(false); }}
-                className="py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5"
-              >
-                <UserCheck size={16} /> Marcar Ausencia
-              </button>
-              <button
-                onClick={generateWhatsAppBrief}
-                className="py-2.5 px-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"
-              >
-                <Share2 size={16} /> {whatsappCopied ? '¡Copiado!' : 'WhatsApp'}
-              </button>
-            </div>
+      {/* CONTENIDO VISTA MES / LISTA */}
+      {view === 'month' && (
+        <div style={{ padding: '15px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+            <h3 style={{ margin: 0, color: '#38bdf8' }}>Operaciones</h3>
+            <button onClick={() => { setForm({ ...form, id: null }); setShowModal(true); }} style={{ backgroundColor: '#16a34a', color: '#fff', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold' }}>
+              + Nuevo Evento
+            </button>
+          </div>
 
-            {/* Listado de Eventos del Día */}
-            <div className="space-y-3">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Programación del Día</h4>
-              {events.filter(e => e.date === selectedDateStr).length === 0 ? (
-                <p className="text-sm text-slate-500 italic py-4 text-center">No hay eventos ni vuelos registrados para este día.</p>
-              ) : (
-                events.filter(e => e.date === selectedDateStr).map(e => (
-                  <div key={e.id} className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
-                    {e.category === 'VUELO' ? (
-                      <>
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold px-2 py-0.5 bg-blue-500/20 text-blue-400 rounded border border-blue-500/30">
-                            {e.aircraft} — {e.flight_type}
-                          </span>
-                          <span className={`text-xs font-bold px-2 py-0.5 rounded border capitalize ${FLIGHT_STATUSES.find(s => s.value === e.status)?.color}`}>
-                            {e.status}
-                          </span>
-                        </div>
-                        <div className="text-base font-bold text-white flex items-center gap-2">
-                          <Plane size={18} className="text-blue-400" /> C/S: {e.callsign || 'Sin Indicativo'}
-                        </div>
-                        <div className="text-xs text-slate-300 space-y-1">
-                          <p className="flex items-center gap-1.5"><MapPin size={14} className="text-slate-500" /> Ruta: <span className="font-mono text-white">{e.itinerary || 'No especificada'}</span></p>
-                          <p className="flex items-center gap-1.5"><User size={14} className="text-slate-500" /> PIC: <strong className="text-blue-400">{e.pic}</strong> | COP: <strong className="text-blue-400">{e.cop}</strong></p>
-                          {e.out_of_hours === 'sí' && <p className="text-amber-400 font-semibold">⚠️ Operación Fuera de Horas</p>}
-                          {e.notes && <p className="text-slate-400 italic mt-1 border-t border-slate-800 pt-1">"{e.notes}"</p>}
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold px-2 py-0.5 bg-purple-500/20 text-purple-400 rounded border border-purple-500/30">
-                            EVENTO / OTROS
-                          </span>
-                          <span className="text-xs text-slate-400">{e.schedule}</span>
-                        </div>
-                        <h5 className="font-bold text-white text-base">{e.title}</h5>
-                        <p className="text-xs text-slate-300">Participantes: {e.participants || 'Todos'}</p>
-                        {e.notes && <p className="text-xs text-slate-400 italic">{e.notes}</p>}
-                      </>
+          {events.length === 0 ? (
+            <p style={{ textAlign: 'center', color: '#64748b', marginTop: '40px' }}>No hay vuelos ni eventos programados.</p>
+          ) : (
+            events.map(e => (
+              <div key={e.id} style={{ backgroundColor: '#1e293b', borderRadius: '10px', padding: '15px', marginBottom: '12px', borderLeft: e.type === 'VUELO' ? '5px solid #2563eb' : '5px solid #f59e0b' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '12px', color: '#94a3b8' }}>{e.date} | {e.start_time} - {e.end_time}</span>
+                  <span style={{ fontSize: '12px', padding: '2px 8px', borderRadius: '4px', backgroundColor: e.status === 'FINALIZADO' ? '#16a34a' : '#334155' }}>
+                    {e.status}
+                  </span>
+                </div>
+                <h4 style={{ margin: '8px 0', fontSize: '16px', color: '#f8fafc' }}>{e.title}</h4>
+                {e.type === 'VUELO' && (
+                  <div style={{ fontSize: '13px', color: '#cbd5e1' }}>
+                    <p style={{ margin: '3px 0' }}>🧑‍✈️ <strong>PIC:</strong> {e.pic} | <strong>COP:</strong> {e.cop}</p>
+                    {e.status === 'FINALIZADO' && (
+                      <p style={{ margin: '3px 0', color: '#4ade80' }}>⏱️ <strong>Horas:</strong> {e.horas_vuelo}h {e.fuera_horas ? '🌙 (Fuera de Horas)' : ''}</p>
                     )}
                   </div>
-                ))
-              )}
-            </div>
+                )}
+                <div style={{ marginTop: '10px', display: 'flex', gap: '10px' }}>
+                  <button onClick={() => { setForm(e); setShowModal(true); }} style={{ background: '#334155', color: '#38bdf8', border: 'none', padding: '6px 12px', borderRadius: '5px', fontSize: '12px' }}>Editar</button>
+                  <button onClick={() => handleDeleteEvent(e.id)} style={{ background: '#334155', color: '#ef4444', border: 'none', padding: '6px 12px', borderRadius: '5px', fontSize: '12px' }}>Eliminar</button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
 
-            {/* Listado de Ausencias */}
-            <div className="space-y-2 border-t border-slate-800 pt-4">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Estado de Disponibilidad</h4>
-              {availabilities.filter(a => a.date === selectedDateStr).length === 0 ? (
-                <p className="text-xs text-slate-500 italic">Todos los pilotos están disponibles.</p>
-              ) : (
-                <div className="grid grid-cols-2 gap-2">
-                  {availabilities.filter(a => a.date === selectedDateStr).map(a => (
-                    <div key={a.id} className="bg-rose-950/20 border border-rose-900/40 rounded-lg p-2 text-xs flex items-center justify-between">
-                      <span className="font-bold text-slate-200">PILOTO {a.pilot}</span>
-                      <span className="uppercase font-mono font-bold text-rose-400">{a.status}</span>
+      {/* TABLAS DE ESTADÍSTICAS Y HORAS */}
+      {view === 'stats' && (
+        <div style={{ padding: '15px' }}>
+          <h3 style={{ color: '#38bdf8', marginBottom: '15px' }}>Resumen de Horas acumuladas</h3>
+          
+          <table style={{ width: '100%', borderCollapse: 'collapse', backgroundColor: '#1e293b', borderRadius: '8px', overflow: 'hidden', marginBottom: '25px' }}>
+            <thead>
+              <tr style={{ backgroundColor: '#334155', color: '#38bdf8', textAlign: 'left' }}>
+                <th style={{ padding: '10px' }}>Piloto</th>
+                <th style={{ padding: '10px' }}>PIC</th>
+                <th style={{ padding: '10px' }}>COP</th>
+                <th style={{ padding: '10px' }}>Total Hrs</th>
+              </tr>
+            </thead>
+            <tbody>
+              {PILOTS.map(p => (
+                <tr key={p} style={{ borderBottom: '1px solid #334155' }}>
+                  <td style={{ padding: '10px', fontWeight: 'bold' }}>{p}</td>
+                  <td style={{ padding: '10px' }}>{pilotStats[p].picHours.toFixed(1)}h</td>
+                  <td style={{ padding: '10px' }}>{pilotStats[p].copHours.toFixed(1)}h</td>
+                  <td style={{ padding: '10px', color: '#4ade80', fontWeight: 'bold' }}>{pilotStats[p].totalHours.toFixed(1)}h</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <h3 style={{ color: '#f59e0b', marginBottom: '15px' }}>Vuelos Fuera de Horas</h3>
+          <table style={{ width: '100%', borderCollapse: 'collapse', backgroundColor: '#1e293b', borderRadius: '8px', overflow: 'hidden' }}>
+            <thead>
+              <tr style={{ backgroundColor: '#334155', color: '#f59e0b', textAlign: 'left' }}>
+                <th style={{ padding: '10px' }}>Piloto</th>
+                <th style={{ padding: '10px' }}>Vuelos Fuera de Horas</th>
+              </tr>
+            </thead>
+            <tbody>
+              {PILOTS.map(p => (
+                <tr key={p} style={{ borderBottom: '1px solid #334155' }}>
+                  <td style={{ padding: '10px', fontWeight: 'bold' }}>{p}</td>
+                  <td style={{ padding: '10px', color: '#f59e0b', fontWeight: 'bold' }}>{pilotStats[p].fueraHorasCount} vuelos</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* MODAL CREAR / EDITAR EVENTO */}
+      {showModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '15px', zIndex: 1000 }}>
+          <div style={{ backgroundColor: '#1e293b', borderRadius: '12px', padding: '20px', width: '100%', maxWidth: '400px', maxHeight: '90vh', overflowY: 'auto' }}>
+            <h3 style={{ marginTop: 0, color: '#38bdf8' }}>{form.id ? 'Editar Evento' : 'Nuevo Evento'}</h3>
+            
+            <form onSubmit={handleSaveEvent}>
+              <label style={{ fontSize: '12px', color: '#94a3b8' }}>Tipo:</label>
+              <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} style={{ width: '100%', padding: '8px', margin: '5px 0 12px 0', borderRadius: '6px', backgroundColor: '#334155', color: '#fff', border: 'none' }}>
+                <option value="VUELO">VUELO</option>
+                <option value="OTROS">OTROS / REUNIÓN / GUARDIA</option>
+              </select>
+
+              {form.type === 'OTROS' && (
+                <>
+                  <label style={{ fontSize: '12px', color: '#94a3b8' }}>Título:</label>
+                  <input type="text" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} required style={{ width: '100%', padding: '8px', margin: '5px 0 12px 0', borderRadius: '6px', backgroundColor: '#334155', color: '#fff', border: 'none' }} />
+                </>
+              )}
+
+              {form.type === 'VUELO' && (
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                    <div>
+                      <label style={{ fontSize: '12px', color: '#94a3b8' }}>Aeronave:</label>
+                      <select value={form.aircraft} onChange={e => setForm({ ...form, aircraft: e.target.value })} style={{ width: '100%', padding: '8px', margin: '5px 0 12px 0', borderRadius: '6px', backgroundColor: '#334155', color: '#fff', border: 'none' }}>
+                        {AIRCRAFT_LIST.map(a => <option key={a} value={a}>{a}</option>)}
+                      </select>
                     </div>
-                  ))}
-                </div>
+                    <div>
+                      <label style={{ fontSize: '12px', color: '#94a3b8' }}>Callsign:</label>
+                      <input type="text" value={form.callsign} onChange={e => setForm({ ...form, callsign: e.target.value })} style={{ width: '100%', padding: '8px', margin: '5px 0 12px 0', borderRadius: '6px', backgroundColor: '#334155', color: '#fff', border: 'none' }} />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                    <div>
+                      <label style={{ fontSize: '12px', color: '#94a3b8' }}>PIC:</label>
+                      <select value={form.pic} onChange={e => setForm({ ...form, pic: e.target.value })} style={{ width: '100%', padding: '8px', margin: '5px 0 12px 0', borderRadius: '6px', backgroundColor: '#334155', color: '#fff', border: 'none' }}>
+                        {PILOTS.map(p => <option key={p} value={p}>{p}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '12px', color: '#94a3b8' }}>COP:</label>
+                      <select value={form.cop} onChange={e => setForm({ ...form, cop: e.target.value })} style={{ width: '100%', padding: '8px', margin: '5px 0 12px 0', borderRadius: '6px', backgroundColor: '#334155', color: '#fff', border: 'none' }}>
+                        {PILOTS.map(p => <option key={p} value={p}>{p}</option>)}
+                      </select>
+                    </div>
+                  </div>
+
+                  <label style={{ fontSize: '12px', color: '#94a3b8' }}>Estado del Vuelo:</label>
+                  <select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })} style={{ width: '100%', padding: '8px', margin: '5px 0 12px 0', borderRadius: '6px', backgroundColor: '#334155', color: '#fff', border: 'none' }}>
+                    <option value="PROGRAMADO">PROGRAMADO</option>
+                    <option value="EN CURSO">EN CURSO</option>
+                    <option value="FINALIZADO">FINALIZADO</option>
+                    <option value="CANCELADO">CANCELADO</option>
+                  </select>
+
+                  {/* DESPLEGABLES EXTRA SI ESTÁ FINALIZADO */}
+                  {form.status === 'FINALIZADO' && (
+                    <div style={{ padding: '10px', backgroundColor: '#0f172a', borderRadius: '8px', marginBottom: '12px', border: '1px solid #16a34a' }}>
+                      <label style={{ fontSize: '12px', color: '#4ade80', fontWeight: 'bold' }}>Horas de Vuelo Realizadas:</label>
+                      <input type="number" step="0.1" value={form.horas_vuelo} onChange={e => setForm({ ...form, horas_vuelo: e.target.value })} style={{ width: '100%', padding: '8px', margin: '5px 0 10px 0', borderRadius: '6px', backgroundColor: '#334155', color: '#fff', border: 'none' }} />
+
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#f59e0b', cursor: 'pointer' }}>
+                        <input type="checkbox" checked={form.fuera_horas} onChange={e => setForm({ ...form, fuera_horas: e.target.checked })} />
+                        ¿Ha sido Vuelo Fuera de Horas?
+                      </label>
+                    </div>
+                  )}
+                </>
               )}
-            </div>
-          </div>
-        </div>
-      )}
 
-      {/* MODAL CREAR EVENTO / VUELO */}
-      {showEventModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <h3 className="font-bold text-lg text-white">Nuevo Registro para {selectedDateStr}</h3>
-              <button onClick={() => setShowEventModal(false)} className="text-slate-400 hover:text-white">
-                <X size={20} />
-              </button>
-            </div>
+              <label style={{ fontSize: '12px', color: '#94a3b8' }}>Fecha:</label>
+              <input type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} required style={{ width: '100%', padding: '8px', margin: '5px 0 12px 0', borderRadius: '6px', backgroundColor: '#334155', color: '#fff', border: 'none' }} />
 
-            {/* Selector Categoría */}
-            <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800">
-              <button
-                onClick={() => setEventForm(f => ({ ...f, category: 'VUELO' }))}
-                className={`flex-1 py-2 text-xs font-bold rounded-lg transition ${eventForm.category === 'VUELO' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}
-              >
-                ✈️ VUELO
-              </button>
-              <button
-                onClick={() => setEventForm(f => ({ ...f, category: 'OTROS' }))}
-                className={`flex-1 py-2 text-xs font-bold rounded-lg transition ${eventForm.category === 'OTROS' ? 'bg-purple-600 text-white' : 'text-slate-400'}`}
-              >
-                📌 OTROS EVENTOS
-              </button>
-            </div>
-
-            {/* Alerta Incompatibilidad Pilotos */}
-            {crewConflict && (
-              <div className="bg-amber-950/40 border border-amber-500/40 rounded-xl p-3 flex items-start gap-2.5 text-xs text-amber-300">
-                <AlertTriangle size={18} className="shrink-0 text-amber-400" />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                 <div>
-                  <strong className="block font-bold">Incompatibilidad de Tripulación:</strong>
-                  {crewConflict}
+                  <label style={{ fontSize: '12px', color: '#94a3b8' }}>Hora Inicio:</label>
+                  <input type="time" value={form.start_time} onChange={e => setForm({ ...form, start_time: e.target.value })} required style={{ width: '100%', padding: '8px', margin: '5px 0 12px 0', borderRadius: '6px', backgroundColor: '#334155', color: '#fff', border: 'none' }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: '12px', color: '#94a3b8' }}>Hora Fin:</label>
+                  <input type="time" value={form.end_time} onChange={e => setForm({ ...form, end_time: e.target.value })} required style={{ width: '100%', padding: '8px', margin: '5px 0 12px 0', borderRadius: '6px', backgroundColor: '#334155', color: '#fff', border: 'none' }} />
                 </div>
               </div>
-            )}
 
-            {/* Formulario VUELO */}
-            {eventForm.category === 'VUELO' ? (
-              <div className="space-y-3 text-xs">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-slate-400 font-semibold mb-1">Aeronave</label>
-                    <select
-                      value={eventForm.aircraft}
-                      onChange={e => setEventForm({ ...eventForm, aircraft: e.target.value })}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white"
-                    >
-                      {AIRCRAFT.map(a => <option key={a} value={a}>{a}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-slate-400 font-semibold mb-1">Tipo Vuelo</label>
-                    <select
-                      value={eventForm.flight_type}
-                      onChange={e => setEventForm({ ...eventForm, flight_type: e.target.value })}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white"
-                    >
-                      {FLIGHT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-slate-400 font-semibold mb-1">Estado</label>
-                    <select
-                      value={eventForm.status}
-                      onChange={e => setEventForm({ ...eventForm, status: e.target.value })}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white capitalize"
-                    >
-                      {FLIGHT_STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-slate-400 font-semibold mb-1">Fuera Horas</label>
-                    <select
-                      value={eventForm.out_of_hours}
-                      onChange={e => setEventForm({ ...eventForm, out_of_hours: e.target.value })}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white"
-                    >
-                      <option value="no">No</option>
-                      <option value="sí">Sí</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-slate-400 font-semibold mb-1">Identificación / Callsign</label>
-                  <input
-                    type="text"
-                    placeholder="Ej. ANV401"
-                    value={eventForm.callsign}
-                    onChange={e => setEventForm({ ...eventForm, callsign: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white font-mono"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-400 font-semibold mb-1">Itinerario</label>
-                  <input
-                    type="text"
-                    placeholder="Ej. LERT-LETO-LERT"
-                    value={eventForm.itinerary}
-                    onChange={e => setEventForm({ ...eventForm, itinerary: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white font-mono uppercase"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-slate-400 font-semibold mb-1">Comandante (PIC)</label>
-                    <select
-                      value={eventForm.pic}
-                      onChange={e => setEventForm({ ...eventForm, pic: e.target.value })}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white"
-                    >
-                      {PILOTS.map(p => <option key={p} value={p}>{p}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-slate-400 font-semibold mb-1">Copiloto (COP)</label>
-                    <select
-                      value={eventForm.cop}
-                      onChange={e => setEventForm({ ...eventForm, cop: e.target.value })}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white"
-                    >
-                      {PILOTS.map(p => <option key={p} value={p}>{p}</option>)}
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-slate-400 font-semibold mb-1">Observaciones</label>
-                  <textarea
-                    rows={2}
-                    placeholder="Notas de handling, pasaje, catering..."
-                    value={eventForm.notes}
-                    onChange={e => setEventForm({ ...eventForm, notes: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white"
-                  />
-                </div>
+              <div style={{ display: 'flex', gap: '10px', marginTop: '15px' }}>
+                <button type="submit" style={{ flex: 1, backgroundColor: '#2563eb', color: '#fff', border: 'none', padding: '10px', borderRadius: '6px', fontWeight: 'bold' }}>Guardar</button>
+                <button type="button" onClick={() => setShowModal(false)} style={{ flex: 1, backgroundColor: '#475569', color: '#fff', border: 'none', padding: '10px', borderRadius: '6px' }}>Cancelar</button>
               </div>
-            ) : (
-              /* Formulario OTROS */
-              <div className="space-y-3 text-xs">
-                <div>
-                  <label className="block text-slate-400 font-semibold mb-1">Nombre del Evento</label>
-                  <input
-                    type="text"
-                    placeholder="Ej. Reunión de Escuadrilla"
-                    value={eventForm.title}
-                    onChange={e => setEventForm({ ...eventForm, title: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-400 font-semibold mb-1">Horario</label>
-                  <input
-                    type="text"
-                    placeholder="Ej. 09:00 - 11:00 LCL"
-                    value={eventForm.schedule}
-                    onChange={e => setEventForm({ ...eventForm, schedule: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-400 font-semibold mb-1">Participantes</label>
-                  <input
-                    type="text"
-                    placeholder="Ej. Todos los pilotos"
-                    value={eventForm.participants}
-                    onChange={e => setEventForm({ ...eventForm, participants: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-400 font-semibold mb-1">Info Adicional</label>
-                  <textarea
-                    rows={2}
-                    placeholder="Detalles..."
-                    value={eventForm.notes}
-                    onChange={e => setEventForm({ ...eventForm, notes: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white"
-                  />
-                </div>
-              </div>
-            )}
-
-            <button
-              onClick={handleSaveEvent}
-              className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition shadow-lg mt-2 text-xs"
-            >
-              Guardar en Calendario
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL DISPONIBILIDAD PILOTO */}
-      {showAvailModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <h3 className="font-bold text-lg text-white">Marcar Indisponibilidad</h3>
-              <button onClick={() => setShowAvailModal(false)} className="text-slate-400 hover:text-white">
-                <X size={20} />
-              </button>
-            </div>
-
-            <p className="text-xs text-slate-400">Fecha: <strong className="text-white">{selectedDateStr}</strong></p>
-
-            <div className="space-y-3 text-xs">
-              <div>
-                <label className="block text-slate-400 font-semibold mb-1">Piloto</label>
-                <select
-                  value={availForm.pilot}
-                  onChange={e => setAvailForm({ ...availForm, pilot: e.target.value })}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white"
-                >
-                  {PILOTS.map(p => <option key={p} value={p}>{p}</option>)}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-slate-400 font-semibold mb-1">Estado de Ausencia / Guardia</label>
-                <select
-                  value={availForm.status}
-                  onChange={e => setAvailForm({ ...availForm, status: e.target.value })}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white uppercase"
-                >
-                  {AVAILABILITY_TYPES.map(a => <option key={a} value={a}>{a.toUpperCase()}</option>)}
-                </select>
-              </div>
-            </div>
-
-            <button
-              onClick={handleSaveAvail}
-              className="w-full py-3 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl transition shadow-lg text-xs"
-            >
-              Confirmar Estado
-            </button>
+            </form>
           </div>
         </div>
       )}
