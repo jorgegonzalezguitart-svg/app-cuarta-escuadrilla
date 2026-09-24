@@ -77,14 +77,16 @@ export default function App() {
     setLoading(true);
 
     const isVuelo = form.type === 'VUELO';
+    const tipoVal = form.tipo_vuelo || 'LOG';
+
     const payload = {
-      title: isVuelo ? `VUELO ${form.aircraft} - ${form.tipo_vuelo}` : form.title,
+      title: isVuelo ? `VUELO ${form.aircraft} - ${tipoVal}` : form.title,
       type: form.type,
       date: form.date,
       start_time: form.start_time,
       end_time: form.end_time,
       aircraft: isVuelo ? form.aircraft : null,
-      tipo_vuelo: isVuelo ? form.tipo_vuelo : null,
+      tipo_vuelo: isVuelo ? tipoVal : null,
       mision: isVuelo ? form.mision : null,
       pic: isVuelo ? form.pic : null,
       cop: isVuelo ? form.cop : null,
@@ -126,6 +128,7 @@ export default function App() {
     events.filter(e => e.type === 'VUELO' && e.status === 'FINALIZADO').forEach(e => {
       const hrs = parseFloat(e.horas_vuelo) || 0;
       const isFuera = e.fuera_horas === true || e.fuera_horas === 'true';
+      const tipo = e.tipo_vuelo || 'LOG';
 
       if (e.pic && pilotStats[e.pic]) {
         pilotStats[e.pic].picHours += hrs;
@@ -133,7 +136,7 @@ export default function App() {
         if (isFuera) {
           fueraHorasByPilot[e.pic].push({
             id: e.id,
-            tipo_vuelo: e.tipo_vuelo || 'N/A',
+            tipo_vuelo: tipo,
             mision: e.mision || 'Sin Misión',
             fecha: e.date,
             rol: 'PIC'
@@ -146,7 +149,7 @@ export default function App() {
         if (isFuera) {
           fueraHorasByPilot[e.cop].push({
             id: e.id,
-            tipo_vuelo: e.tipo_vuelo || 'N/A',
+            tipo_vuelo: tipo,
             mision: e.mision || 'Sin Misión',
             fecha: e.date,
             rol: 'COP'
@@ -222,9 +225,10 @@ export default function App() {
 
   const getEventBorderColor = (e) => {
     if (e.type === 'VUELO') {
-      return FLIGHT_TYPE_COLORS[e.tipo_vuelo] || '#2563eb';
+      const tipo = e.tipo_vuelo || 'LOG';
+      return FLIGHT_TYPE_COLORS[tipo] || '#16a34a';
     }
-    return '#8b5cf6'; // Morado para EVENTO
+    return '#8b5cf6';
   };
 
   return (
@@ -273,7 +277,7 @@ export default function App() {
                   key={item.dateStr}
                   onClick={() => setSelectedDate(item.dateStr)}
                   style={{
-                    backgroundColor: isSelected ? '#1e293b' : '#1e293b',
+                    backgroundColor: '#1e293b',
                     borderRadius: '6px',
                     padding: '4px',
                     minHeight: '55px',
@@ -283,24 +287,27 @@ export default function App() {
                 >
                   <span style={{ fontSize: '12px', fontWeight: 'bold', color: isSelected ? '#38bdf8' : '#cbd5e1' }}>{item.dayNumber}</span>
                   <div style={{ marginTop: '2px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                    {dayEvts.slice(0, 2).map(e => (
-                      <span
-                        key={e.id}
-                        style={{
-                          fontSize: '9px',
-                          backgroundColor: e.type === 'VUELO' ? FLIGHT_TYPE_COLORS[e.tipo_vuelo] || '#2563eb' : '#8b5cf6',
-                          color: '#fff',
-                          padding: '1px 3px',
-                          borderRadius: '2px',
-                          whiteSpace: 'nowrap',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          fontWeight: 'bold'
-                        }}
-                      >
-                        {e.type === 'VUELO' ? `${e.tipo_vuelo} - ${e.mision || 'Misión'}` : e.title}
-                      </span>
-                    ))}
+                    {dayEvts.slice(0, 2).map(e => {
+                      const tipo = e.tipo_vuelo || 'LOG';
+                      return (
+                        <span
+                          key={e.id}
+                          style={{
+                            fontSize: '9px',
+                            backgroundColor: e.type === 'VUELO' ? (FLIGHT_TYPE_COLORS[tipo] || '#16a34a') : '#8b5cf6',
+                            color: '#fff',
+                            padding: '1px 3px',
+                            borderRadius: '2px',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            fontWeight: 'bold'
+                          }}
+                        >
+                          {e.type === 'VUELO' ? `[${tipo}] ${e.mision || e.aircraft || 'Vuelo'}` : e.title}
+                        </span>
+                      );
+                    })}
                     {dayEvts.length > 2 && <span style={{ fontSize: '8px', color: '#38bdf8' }}>+{dayEvts.length - 2} más</span>}
                   </div>
                 </div>
@@ -344,36 +351,38 @@ export default function App() {
             {selectedDayEvents.length === 0 ? (
               <p style={{ margin: 0, fontSize: '13px', color: '#64748b' }}>Sin actividad este día.</p>
             ) : (
-              selectedDayEvents.map(e => (
-                <div key={e.id} style={{ marginTop: '8px', padding: '10px', backgroundColor: '#334155', borderRadius: '6px', borderLeft: `4px solid ${getEventBorderColor(e)}` }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ fontWeight: 'bold', color: e.type === 'VUELO' ? FLIGHT_TYPE_COLORS[e.tipo_vuelo] || '#38bdf8' : '#c084fc' }}>
-                      {e.type === 'VUELO' ? `[${e.tipo_vuelo}] ${e.aircraft} - ${e.mision || 'Sin Misión'}` : `[EVENTO] ${e.title}`}
-                    </span>
-                    <span style={{ fontSize: '11px', color: '#94a3b8' }}>{e.start_time} - {e.end_time}</span>
-                  </div>
-
-                  {e.type === 'VUELO' && (
-                    <div style={{ fontSize: '12px', color: '#cbd5e1', marginTop: '4px' }}>
-                      <p style={{ margin: '2px 0' }}>🧑‍✈️ <strong>PIC:</strong> {e.pic} | <strong>COP:</strong> {e.cop} | Estado: <strong>{e.status}</strong></p>
-                      {e.itinerario && <p style={{ margin: '2px 0', color: '#fcd34d' }}>📍 <strong>Itinerario:</strong> {e.itinerario}</p>}
-                      {e.status === 'FINALIZADO' && <p style={{ margin: '2px 0', color: '#4ade80' }}>⏱️ <strong>Horas:</strong> {e.horas_vuelo}h {e.fuera_horas ? '🌙 (Fuera de Horas)' : ''}</p>}
+              selectedDayEvents.map(e => {
+                const tipo = e.tipo_vuelo || 'LOG';
+                return (
+                  <div key={e.id} style={{ marginTop: '8px', padding: '10px', backgroundColor: '#334155', borderRadius: '6px', borderLeft: `4px solid ${getEventBorderColor(e)}` }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ fontWeight: 'bold', color: e.type === 'VUELO' ? (FLIGHT_TYPE_COLORS[tipo] || '#38bdf8') : '#c084fc' }}>
+                        {e.type === 'VUELO' ? `[${tipo}] ${e.aircraft || 'PC-24'} - Misión: ${e.mision || 'Sin Misión'}` : `[EVENTO] ${e.title}`}
+                      </span>
+                      <span style={{ fontSize: '11px', color: '#94a3b8' }}>{e.start_time} - {e.end_time}</span>
                     </div>
-                  )}
 
-                  {e.type === 'EVENTO' && (
-                    <div style={{ fontSize: '12px', color: '#cbd5e1', marginTop: '4px' }}>
-                      {e.description && <p style={{ margin: '2px 0' }}>📝 <strong>Descripción:</strong> {e.description}</p>}
-                      {e.informacion && <p style={{ margin: '2px 0', color: '#38bdf8' }}>ℹ️ <strong>Información:</strong> {e.informacion}</p>}
+                    {e.type === 'VUELO' && (
+                      <div style={{ fontSize: '12px', color: '#cbd5e1', marginTop: '4px' }}>
+                        <p style={{ margin: '2px 0' }}>🧑‍✈️ <strong>PIC:</strong> {e.pic} | <strong>COP:</strong> {e.cop} | Estado: <strong>{e.status}</strong></p>
+                        {e.itinerario && <p style={{ margin: '2px 0', color: '#fcd34d' }}>📍 <strong>Itinerario:</strong> {e.itinerario}</p>}
+                      </div>
+                    )}
+
+                    {e.type === 'EVENTO' && (
+                      <div style={{ fontSize: '12px', color: '#cbd5e1', marginTop: '4px' }}>
+                        {e.description && <p style={{ margin: '2px 0' }}>📝 <strong>Descripción:</strong> {e.description}</p>}
+                        {e.informacion && <p style={{ margin: '2px 0', color: '#38bdf8' }}>ℹ️ <strong>Información:</strong> {e.informacion}</p>}
+                      </div>
+                    )}
+
+                    <div style={{ marginTop: '8px', display: 'flex', gap: '8px' }}>
+                      <button onClick={() => { setForm({ ...e, tipo_vuelo: tipo, itinerario: e.itinerario || '', mision: e.mision || '', description: e.description || '', informacion: e.informacion || '' }); setShowModal(true); }} style={{ background: '#1e293b', color: '#38bdf8', border: 'none', padding: '4px 8px', borderRadius: '4px', fontSize: '11px' }}>Editar</button>
+                      <button onClick={() => handleDeleteEvent(e.id)} style={{ background: '#1e293b', color: '#ef4444', border: 'none', padding: '4px 8px', borderRadius: '4px', fontSize: '11px' }}>Eliminar</button>
                     </div>
-                  )}
-
-                  <div style={{ marginTop: '8px', display: 'flex', gap: '8px' }}>
-                    <button onClick={() => { setForm({ ...e, itinerario: e.itinerario || '', mision: e.mision || '', description: e.description || '', informacion: e.informacion || '' }); setShowModal(true); }} style={{ background: '#1e293b', color: '#38bdf8', border: 'none', padding: '4px 8px', borderRadius: '4px', fontSize: '11px' }}>Editar</button>
-                    <button onClick={() => handleDeleteEvent(e.id)} style={{ background: '#1e293b', color: '#ef4444', border: 'none', padding: '4px 8px', borderRadius: '4px', fontSize: '11px' }}>Eliminar</button>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>
@@ -391,18 +400,21 @@ export default function App() {
                 {dayEvents.length === 0 ? (
                   <p style={{ margin: '5px 0 0 0', fontSize: '12px', color: '#64748b' }}>Sin actividad</p>
                 ) : (
-                  dayEvents.map(e => (
-                    <div key={e.id} style={{ marginTop: '8px', padding: '8px', backgroundColor: '#334155', borderRadius: '6px', borderLeft: `3px solid ${getEventBorderColor(e)}` }}>
-                      <div style={{ fontWeight: 'bold', color: e.type === 'VUELO' ? FLIGHT_TYPE_COLORS[e.tipo_vuelo] || '#38bdf8' : '#c084fc' }}>
-                        {e.type === 'VUELO' ? `[${e.tipo_vuelo}] ${e.aircraft} - ${e.mision || ''}` : e.title} ({e.start_time} - {e.end_time})
-                      </div>
-                      {e.type === 'VUELO' && (
-                        <div style={{ fontSize: '12px', color: '#cbd5e1', marginTop: '2px' }}>
-                          PIC: {e.pic} | COP: {e.cop} | Estado: {e.status}
+                  dayEvents.map(e => {
+                    const tipo = e.tipo_vuelo || 'LOG';
+                    return (
+                      <div key={e.id} style={{ marginTop: '8px', padding: '8px', backgroundColor: '#334155', borderRadius: '6px', borderLeft: `3px solid ${getEventBorderColor(e)}` }}>
+                        <div style={{ fontWeight: 'bold', color: e.type === 'VUELO' ? (FLIGHT_TYPE_COLORS[tipo] || '#38bdf8') : '#c084fc' }}>
+                          {e.type === 'VUELO' ? `[${tipo}] ${e.aircraft || 'PC-24'} - ${e.mision || 'Sin Misión'}` : e.title} ({e.start_time} - {e.end_time})
                         </div>
-                      )}
-                    </div>
-                  ))
+                        {e.type === 'VUELO' && (
+                          <div style={{ fontSize: '12px', color: '#cbd5e1', marginTop: '2px' }}>
+                            PIC: {e.pic} | COP: {e.cop} | Estado: {e.status}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
                 )}
               </div>
             );
@@ -423,45 +435,45 @@ export default function App() {
           {events.length === 0 ? (
             <p style={{ textAlign: 'center', color: '#64748b', marginTop: '40px' }}>No hay registros guardados.</p>
           ) : (
-            events.map(e => (
-              <div key={e.id} style={{ backgroundColor: '#1e293b', borderRadius: '10px', padding: '15px', marginBottom: '12px', borderLeft: `5px solid ${getEventBorderColor(e)}` }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ fontSize: '12px', color: '#94a3b8' }}>{e.date} | {e.start_time} - {e.end_time}</span>
-                  {e.type === 'VUELO' && (
-                    <span style={{ fontSize: '12px', padding: '2px 8px', borderRadius: '4px', backgroundColor: e.status === 'FINALIZADO' ? '#16a34a' : '#334155' }}>
-                      {e.status}
-                    </span>
-                  )}
-                </div>
-                <h4 style={{ margin: '8px 0', fontSize: '16px', color: e.type === 'VUELO' ? FLIGHT_TYPE_COLORS[e.tipo_vuelo] || '#f8fafc' : '#c084fc' }}>
-                  {e.type === 'VUELO' ? `[${e.tipo_vuelo}] ${e.aircraft} - ${e.mision || 'Sin Misión'}` : `[EVENTO] ${e.title}`}
-                </h4>
-                {e.type === 'VUELO' && (
-                  <div style={{ fontSize: '13px', color: '#cbd5e1' }}>
-                    <p style={{ margin: '3px 0' }}>🧑‍✈️ <strong>PIC:</strong> {e.pic} | <strong>COP:</strong> {e.cop}</p>
-                    {e.itinerario && <p style={{ margin: '3px 0', color: '#fcd34d' }}>📍 <strong>Itinerario:</strong> {e.itinerario}</p>}
-                    {e.status === 'FINALIZADO' && (
-                      <p style={{ margin: '3px 0', color: '#4ade80' }}>⏱️ <strong>Horas:</strong> {e.horas_vuelo}h {e.fuera_horas ? '🌙 (Fuera de Horas)' : ''}</p>
+            events.map(e => {
+              const tipo = e.tipo_vuelo || 'LOG';
+              return (
+                <div key={e.id} style={{ backgroundColor: '#1e293b', borderRadius: '10px', padding: '15px', marginBottom: '12px', borderLeft: `5px solid ${getEventBorderColor(e)}` }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: '12px', color: '#94a3b8' }}>{e.date} | {e.start_time} - {e.end_time}</span>
+                    {e.type === 'VUELO' && (
+                      <span style={{ fontSize: '12px', padding: '2px 8px', borderRadius: '4px', backgroundColor: e.status === 'FINALIZADO' ? '#16a34a' : '#334155' }}>
+                        {e.status}
+                      </span>
                     )}
                   </div>
-                )}
-                {e.type === 'EVENTO' && (
-                  <div style={{ fontSize: '13px', color: '#cbd5e1' }}>
-                    {e.description && <p style={{ margin: '3px 0' }}>📝 <strong>Descripción:</strong> {e.description}</p>}
-                    {e.informacion && <p style={{ margin: '3px 0', color: '#38bdf8' }}>ℹ️ <strong>Información:</strong> {e.informacion}</p>}
+                  <h4 style={{ margin: '8px 0', fontSize: '16px', color: e.type === 'VUELO' ? (FLIGHT_TYPE_COLORS[tipo] || '#f8fafc') : '#c084fc' }}>
+                    {e.type === 'VUELO' ? `[${tipo}] ${e.aircraft || 'PC-24'} - Misión: ${e.mision || 'Sin Misión'}` : `[EVENTO] ${e.title}`}
+                  </h4>
+                  {e.type === 'VUELO' && (
+                    <div style={{ fontSize: '13px', color: '#cbd5e1' }}>
+                      <p style={{ margin: '3px 0' }}>🧑‍✈️ <strong>PIC:</strong> {e.pic} | <strong>COP:</strong> {e.cop}</p>
+                      {e.itinerario && <p style={{ margin: '3px 0', color: '#fcd34d' }}>📍 <strong>Itinerario:</strong> {e.itinerario}</p>}
+                    </div>
+                  )}
+                  {e.type === 'EVENTO' && (
+                    <div style={{ fontSize: '13px', color: '#cbd5e1' }}>
+                      {e.description && <p style={{ margin: '3px 0' }}>📝 <strong>Descripción:</strong> {e.description}</p>}
+                      {e.informacion && <p style={{ margin: '3px 0', color: '#38bdf8' }}>ℹ️ <strong>Información:</strong> {e.informacion}</p>}
+                    </div>
+                  )}
+                  <div style={{ marginTop: '10px', display: 'flex', gap: '10px' }}>
+                    <button onClick={() => { setForm({ ...e, tipo_vuelo: tipo, itinerario: e.itinerario || '', mision: e.mision || '', description: e.description || '', informacion: e.informacion || '' }); setShowModal(true); }} style={{ background: '#334155', color: '#38bdf8', border: 'none', padding: '6px 12px', borderRadius: '5px', fontSize: '12px' }}>Editar</button>
+                    <button onClick={() => handleDeleteEvent(e.id)} style={{ background: '#334155', color: '#ef4444', border: 'none', padding: '6px 12px', borderRadius: '5px', fontSize: '12px' }}>Eliminar</button>
                   </div>
-                )}
-                <div style={{ marginTop: '10px', display: 'flex', gap: '10px' }}>
-                  <button onClick={() => { setForm({ ...e, itinerario: e.itinerario || '', mision: e.mision || '', description: e.description || '', informacion: e.informacion || '' }); setShowModal(true); }} style={{ background: '#334155', color: '#38bdf8', border: 'none', padding: '6px 12px', borderRadius: '5px', fontSize: '12px' }}>Editar</button>
-                  <button onClick={() => handleDeleteEvent(e.id)} style={{ background: '#334155', color: '#ef4444', border: 'none', padding: '6px 12px', borderRadius: '5px', fontSize: '12px' }}>Eliminar</button>
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       )}
 
-      {/* VISTA ESTADÍSTICAS Y LISTA DE FUERA DE HORAS */}
+      {/* VISTA ESTADÍSTICAS */}
       {view === 'stats' && (
         <div style={{ padding: '15px' }}>
           <h3 style={{ color: '#38bdf8', marginBottom: '15px', marginTop: 0 }}>1. Horas Acumuladas por Piloto</h3>
